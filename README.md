@@ -113,22 +113,6 @@ Dentro do `index.html`, a organização é:
 
 ---
 
-## 🛠️ Criar o repositório e fazer push
-
-No terminal, dentro da pasta do projeto:
-
-```bash
-git init
-git add .
-git commit -m "Primeira versão: simulador imobiliário PT (fiscalidade 2026)"
-git branch -M main
-# cria o repo vazio no GitHub primeiro (sem README), depois:
-git remote add origin https://github.com/<o-teu-utilizador>/simulador-imobiliario-pt.git
-git push -u origin main
-```
-
----
-
 ## 🧩 Stack técnica
 
 - **React 18** + **ReactDOM** (via CDN, UMD)
