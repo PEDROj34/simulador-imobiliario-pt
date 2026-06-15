@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0B0F17" />
+  <title>Simulador Imobiliário PT · Fiscalidade 2026</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    *{box-sizing:border-box;}
+    html,body{margin:0;padding:0;background:#0B0F17;overflow-x:hidden;-webkit-text-size-adjust:100%;}
+    body{font-family:'Inter',system-ui,sans-serif;}
+    #root{overflow-x:hidden;}
+    svg{max-width:100%;}
+    input,select,button,textarea{font-family:inherit;}
+    input[type=range]{-webkit-appearance:none;appearance:none;background:#26334D;border-radius:999px;height:4px;width:100%;}
+    input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:#4F9CE0;cursor:pointer;border:2px solid #0B0F17;}
+    input[type=range]::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:#4F9CE0;cursor:pointer;border:2px solid #0B0F17;}
+    input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-spin-button{opacity:.3;}
+    *:focus-visible{outline:2px solid #4F9CE0;outline-offset:1px;}
+    .wrap{max-width:1100px;margin:0 auto;padding-left:16px;padding-right:16px;}
+    .grid{display:grid;}
+    .layout-grid{display:grid;gap:20px;grid-template-columns:1fr;}
+    @media (min-width:880px){.layout-grid{grid-template-columns:minmax(0,340px) minmax(0,1fr);}}
+    .g2{grid-template-columns:1fr 1fr;gap:12px;}
+    .cards{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+    @media (min-width:620px){.cards-3{grid-template-columns:1fr 1fr 1fr;}.cards-4{grid-template-columns:1fr 1fr 1fr 1fr;}}
+    .cmp-cards{display:grid;grid-template-columns:1fr;gap:12px;}
+    @media (min-width:760px){.cmp-cards{grid-template-columns:1fr 1fr 1fr;}.cmp-charts{grid-template-columns:1fr 1fr;}.gloss{grid-template-columns:1fr 1fr;}}
+    .cmp-charts{display:grid;grid-template-columns:1fr;gap:16px;}
+    .gloss{display:grid;grid-template-columns:1fr;gap:16px;}
+    .tbl-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+    @media (prefers-reduced-motion: reduce){*{transition:none!important;}}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel" data-presets="react">
+const { useState, useMemo } = React;
+
+/* ════════════════════════════════════════════════════════════════════
+   CONSTANTES FISCAIS — PORTUGAL 2026
+   Fonte: Ofício Circulado n.º 40129/2026 da AT + Código IMT/IRS + OE 2026.
+   ════════════════════════════════════════════════════════════════════ */
+// IMT — Tabela III (Continente, habitação NÃO própria permanente / secundária).
+const IMT_HABITACAO_SECUNDARIA = [
+  { ate: 106346, taxa: 0.01, abater: 0 },
+  { ate: 145470, taxa: 0.02, abater: 1063.46 },
+  { ate: 198347, taxa: 0.05, abater: 5427.56 },
+  { ate: 330539, taxa: 0.07, abater: 9394.5 },
+  { ate: 633931, taxa: 0.08, abater: 12699.89 },
+  { ate: 1150853, taxa: 0.06, abater: 0 },
+  { ate: Infinity, taxa: 0.075, abater: 0 },
+];
+// IMT — Tabela II (IMT Jovem ≤35, 1.ª HPP) — informativo.
+const IMT_JOVEM = [
+  { ate: 330539, taxa: 0, abater: 0 },
+  { ate: 660982, taxa: 0.08, abater: 26443.12 },
+  { ate: 1150853, taxa: 0.06, abater: 0 },
+  { ate: Infinity, taxa: 0.075, abater: 0 },
+];
+const IMT_TERRENO_CONSTRUCAO = 0.065; // terreno construção: 6,5%
+const IMPOSTO_SELO = 0.008;           // Imposto do Selo: 0,8%
+const ESCRITURA_REGISTO_DEFAULT = 1200;
+const REGIMES_IRS = {
+  catF10:    { label: "Cat F · 10% (habitacional, renda moderada — OE 2026)", taxa: 0.10, catB: false },
+  catF28:    { label: "Cat F · 28% (não habitacional)",                        taxa: 0.28, catB: false },
+  catF15:    { label: "Cat F · 15% (contrato ≥5 e <10 anos)",                  taxa: 0.15, catB: false },
+  catF10dur: { label: "Cat F · 10% (contrato ≥10 e <20 anos)",                 taxa: 0.10, catB: false },
+  catF5:     { label: "Cat F · 5% (contrato >20 anos)",                        taxa: 0.05, catB: false },
+  catB:      { label: "Cat B / AL · contabilidade organizada",                taxa: null, catB: true },
+};
+const DEPRECIACAO_ANUAL = 0.02;
+const FRACAO_TERRENO = 0.25;   // VERIFICAR
+const MV_PONTUAL = 0.50;
+const MV_RECORRENTE = 0.95;
+
+/* ── FUNÇÕES PURAS ── */
+function calcIMTHabitacao(valor, tabela) {
+  for (const e of tabela) if (valor <= e.ate) return Math.max(0, valor * e.taxa - e.abater);
+  return 0;
+}
+function calcIMT(valor, tipoAquisicao, imtJovem) {
+  if (tipoAquisicao === "terreno") return valor * IMT_TERRENO_CONSTRUCAO;
+  return calcIMTHabitacao(valor, imtJovem ? IMT_JOVEM : IMT_HABITACAO_SECUNDARIA);
+}
+function prestacaoMensal(capital, tanAnual, mesesAmort) {
+  const r = tanAnual / 12;
+  if (mesesAmort <= 0) return 0;
+  if (r === 0) return capital / mesesAmort;
+  return (capital * r) / (1 - Math.pow(1 + r, -mesesAmort));
+}
+function saldoDivida(capital, tanAnual, prazoMeses, carenciaMeses, decorridos) {
+  const r = tanAnual / 12;
+  if (decorridos <= carenciaMeses) return capital;
+  const mesesAmort = prazoMeses - carenciaMeses;
+  const m = decorridos - carenciaMeses;
+  if (m >= mesesAmort) return 0;
+  if (r === 0) return Math.max(0, capital * (1 - m / mesesAmort));
+  const pag = prestacaoMensal(capital, tanAnual, mesesAmort);
+  const saldo = capital * Math.pow(1 + r, m) - pag * (Math.pow(1 + r, m) - 1) / r;
+  return Math.max(0, saldo);
+}
+function irsRendas({ rendaAnual, despesas, regime, taxaMarginal, jurosAno, depreciacaoAno }) {
+  const cfg = REGIMES_IRS[regime];
+  if (cfg.catB) {
+    const deducoes = despesas + jurosAno + depreciacaoAno;
+    const base = Math.max(0, rendaAnual - deducoes);
+    return { imposto: base * taxaMarginal, base, deducoes, juros: jurosAno, depreciacao: depreciacaoAno, despesas };
+  }
+  const base = Math.max(0, rendaAnual - despesas);
+  return { imposto: base * cfg.taxa, base, deducoes: despesas, juros: 0, depreciacao: 0, despesas };
+}
+function impostoMaisValias(valorVenda, custoTotalAquisicao, frequencia, taxaMarginal) {
+  const ganho = Math.max(0, valorVenda - custoTotalAquisicao);
+  const fracaoTributavel = frequencia === "recorrente" ? MV_RECORRENTE : MV_PONTUAL;
+  return { ganho, imposto: ganho * fracaoTributavel * taxaMarginal, fracaoTributavel };
+}
+
+/* ── MOTOR DE CÁLCULO ── */
+function computeScenario(inp, strategy) {
+  const terreno = strategy === "build";
+  const tipoAquisicao = terreno ? "terreno" : "reabilitar";
+  let custoObras;
+  if (terreno) {
+    const baseConstr = inp.custoModo === "m2" ? inp.areaM2 * inp.custoM2 : inp.obras;
+    custoObras = baseConstr * (1 + inp.extraConstrucaoPct / 100);
+  } else custoObras = inp.obras;
+
+  const precoCompra = inp.preco;
+  const valorPosObras = inp.avaliacao;
+  const imt = calcIMT(precoCompra, tipoAquisicao, inp.imtJovem);
+  const selo = precoCompra * IMPOSTO_SELO;
+  const escritura = inp.escritura;
+  const impostosCompra = imt + selo + escritura;
+
+  const baseFin = inp.financiaObras ? precoCompra + custoObras : precoCompra;
+  const ltv = inp.ltv / 100;
+  const emprestimo = Math.round(baseFin * ltv);
+  const prazoMeses = inp.prazoAnos * 12;
+  const mesesAmort = prazoMeses - inp.carenciaMeses;
+  const prestacaoCarencia = emprestimo * (inp.tan / 100) / 12;
+  const prestacaoNormal = prestacaoMensal(emprestimo, inp.tan / 100, mesesAmort);
+
+  const investimentoTotal = precoCompra + custoObras + impostosCompra;
+  const capitalProprio = Math.max(0, investimentoTotal - emprestimo);
+
+  const equityDia1 = valorPosObras - emprestimo;
+  const valorizacaoForcada = valorPosObras - (precoCompra + custoObras);
+  const equityDeCapitalProprio = equityDia1 - Math.max(0, valorizacaoForcada);
+
+  const rendaMensalEfetiva = inp.renda * (inp.ocupacao / 100);
+  const rendaAnual = rendaMensalEfetiva * 12;
+  const imiAnual = inp.vpt * (inp.imiTaxa / 100);
+  const encargosTotaisAno = inp.despesasAnuais + imiAnual;
+
+  const jurosAno1 = emprestimo * (inp.tan / 100);
+  const baseDepreciavel = terreno ? custoObras : (precoCompra + custoObras) * (1 - FRACAO_TERRENO);
+  const depreciacaoAno = baseDepreciavel * DEPRECIACAO_ANUAL;
+
+  const irs = irsRendas({ rendaAnual, despesas: encargosTotaisAno, regime: inp.regimeIRS, taxaMarginal: inp.taxaMarginal / 100, jurosAno: jurosAno1, depreciacaoAno });
+
+  const cashflowAnual = rendaAnual - prestacaoNormal * 12 - encargosTotaisAno - irs.imposto;
+  const cashflowAnualCarencia = rendaAnual - prestacaoCarencia * 12 - encargosTotaisAno - irs.imposto;
+  const cashflowMensal = cashflowAnual / 12;
+
+  const yieldBruto = valorPosObras > 0 ? rendaAnual / valorPosObras : 0;
+  const noi = rendaAnual - encargosTotaisAno - irs.imposto;
+  const yieldLiquido = valorPosObras > 0 ? noi / valorPosObras : 0;
+  const roe = capitalProprio > 0 ? cashflowAnual / capitalProprio : 0;
+
+  let breakEvenMeses = Infinity;
+  if (cashflowAnual > 0) breakEvenMeses = (capitalProprio / cashflowAnual) * 12;
+
+  const ltvRefi = inp.ltvRefi / 100;
+  const novoEmprestimo = Math.round(valorPosObras * ltvRefi);
+  const capitalRecuperado = Math.max(0, novoEmprestimo - emprestimo);
+  const capitalPreso = Math.max(0, capitalProprio - capitalRecuperado);
+  const prestacaoRefi = prestacaoMensal(novoEmprestimo, inp.tan / 100, prazoMeses);
+
+  const valorVenda = strategy === "flip" ? valorPosObras : (inp.valorVenda || valorPosObras);
+  const custosVenda = valorVenda * (inp.custosVendaPct / 100);
+  const jurosObra = inp.financiaObras ? emprestimo * (inp.tan / 100) / 12 * inp.mesesObra : 0;
+  const custoTotalAquisicao = precoCompra + custoObras + impostosCompra;
+  const mv = impostoMaisValias(valorVenda, custoTotalAquisicao, inp.frequencia, inp.taxaMarginal / 100);
+  const margemLiquida = valorVenda - custoTotalAquisicao - custosVenda - jurosObra - mv.imposto;
+  const roiFlip = capitalProprio > 0 ? margemLiquida / capitalProprio : 0;
+
+  const g = inp.valorizacao / 100;
+  const emprestimoProj = strategy === "brrr" && inp.aplicarRefi ? novoEmprestimo : emprestimo;
+  const projecao = [];
+  let cfAcumulado = 0;
+  for (let ano = 0; ano <= inp.horizonte; ano++) {
+    const propVal = valorPosObras * Math.pow(1 + g, ano);
+    const saldo = saldoDivida(emprestimoProj, inp.tan / 100, prazoMeses, inp.carenciaMeses, ano * 12);
+    const equity = propVal - saldo;
+    if (ano > 0) {
+      const emCarencia = ano * 12 <= inp.carenciaMeses;
+      const prest = emCarencia ? prestacaoCarencia : prestacaoNormal;
+      cfAcumulado += rendaAnual - prest * 12 - encargosTotaisAno - irs.imposto;
+    }
+    projecao.push({ ano, valor: Math.round(propVal), equity: Math.round(equity), cashflowAcum: Math.round(cfAcumulado), patrimonio: Math.round(equity + cfAcumulado - capitalProprio) });
+  }
+
+  const vende = strategy === "flip" || (strategy === "build" && inp.saida === "vender");
+  const patrimonioFinal = vende ? margemLiquida : projecao[projecao.length - 1].patrimonio;
+  const roeComparacao = vende ? roiFlip : roe;
+
+  return {
+    strategy, terreno, vende, custoObras, precoCompra, valorPosObras,
+    imt, selo, escritura, impostosCompra, emprestimo, prazoMeses,
+    prestacaoCarencia, prestacaoNormal, capitalProprio, investimentoTotal,
+    equityDia1, valorizacaoForcada, equityDeCapitalProprio,
+    rendaAnual, rendaMensalEfetiva, encargosTotaisAno, imiAnual, irs,
+    cashflowAnual, cashflowAnualCarencia, cashflowMensal,
+    yieldBruto, yieldLiquido, noi, roe, breakEvenMeses,
+    novoEmprestimo, capitalRecuperado, capitalPreso, prestacaoRefi,
+    valorVenda, custosVenda, jurosObra, mv, margemLiquida, roiFlip,
+    projecao, patrimonioFinal, roeComparacao,
+  };
+}
+
+/* ── PALETA & FORMATAÇÃO ── */
+const C = {
+  bg:"#0B0F17", bgAlt:"#0E1422", surface:"#141D2E", surface2:"#19243A",
+  border:"#26334D", borderSoft:"#1E2A40", text:"#E7ECF5", dim:"#8893A8", faint:"#5B6479",
+  azulejo:"#4F9CE0", azulejoDark:"#2C6BA8", terra:"#D98158", terraDark:"#B5613B",
+  gold:"#E4B863", pos:"#5BC489", neg:"#E0685F",
+};
+const eur = (n) => new Intl.NumberFormat("pt-PT",{style:"currency",currency:"EUR",maximumFractionDigits:0}).format(isFinite(n)?n:0);
+const eur2 = (n) => new Intl.NumberFormat("pt-PT",{style:"currency",currency:"EUR",maximumFractionDigits:0}).format(isFinite(n)?Math.round(n):0);
+const pct = (n) => `${(n*100).toFixed(1).replace(".",",")} %`;
+const meses = (n) => isFinite(n) ? `${Math.round(n)} meses (${(n/12).toFixed(1).replace(".",",")} anos)` : "nunca";
+
+const STRATS = {
+  brrr:{ nome:"Reabilitar & Arrendar", curto:"BRRR", icon:"repeat", cor:C.azulejo },
+  flip:{ nome:"Reabilitar & Revender", curto:"Flip", icon:"hammer", cor:C.terra },
+  build:{ nome:"Terreno & Construir", curto:"Construir", icon:"building", cor:C.gold },
+};
+
+/* ── ÍCONES (SVG embutido) ── */
+const ICONS = {
+  "chevron-down":'<polyline points="6 9 12 15 18 9"/>',
+  info:'<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>',
+  alert:'<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
+  building:'<rect x="4" y="2" width="16" height="20" rx="2"/><path d="M9 22v-4h6v4"/><line x1="8" y1="6" x2="8" y2="6"/><line x1="12" y1="6" x2="12" y2="6"/><line x1="16" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="8" y2="10"/><line x1="12" y1="10" x2="12" y2="10"/><line x1="16" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="8" y2="14"/><line x1="12" y1="14" x2="12" y2="14"/><line x1="16" y1="14" x2="16" y2="14"/>',
+  repeat:'<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>',
+  hammer:'<path d="M14 7l5 5"/><path d="M3 21l8-8"/><path d="M11.5 9.5 15 6l4 4-3.5 3.5z"/>',
+  layers:'<path d="m12 2 9 5-9 5-9-5 9-5z"/><path d="m3 12 9 5 9-5"/><path d="m3 17 9 5 9-5"/>',
+  bank:'<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><line x1="6" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="18" y2="12"/>',
+  key:'<circle cx="7.5" cy="15.5" r="4.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/>',
+  trending:'<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>',
+  scale:'<path d="M12 3v18"/><path d="M3 7h18"/><path d="m5 7-3 6h6z"/><path d="m19 7-3 6h6z"/><path d="M7 21h10"/>',
+  book:'<path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/>',
+};
+function Icon({ name, size=16, color="currentColor", style }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style} dangerouslySetInnerHTML={{ __html: ICONS[name] || "" }} />;
+}
+
+/* ── GRÁFICOS SVG PRÓPRIOS ── */
+function LineChartMini({ data, lines, height=270 }) {
+  const W=640, H=height, padL=48, padR=14, padT=12, padB=40;
+  const [hi, setHi] = useState(null);
+  const xs = data.map(d=>d.ano);
+  const vals = [];
+  lines.forEach(l => data.forEach(d => vals.push(d[l.key])));
+  let min = Math.min(0, ...vals), max = Math.max(...vals);
+  if (max === min) max = min + 1;
+  const xMin = Math.min(...xs), xMax = Math.max(...xs);
+  const X = x => padL + (xMax===xMin?0:(x-xMin)/(xMax-xMin))*(W-padL-padR);
+  const Y = v => padT + (1-(v-min)/(max-min))*(H-padT-padB);
+  const ticks = 4;
+  const gridY = Array.from({length:ticks+1}, (_,i)=> min + (max-min)*i/ticks);
+  const stepX = Math.max(1, Math.ceil(data.length/8));
+  const onMove = e => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const px = (e.clientX - rect.left)/rect.width*W;
+    let best=0, bd=1e9;
+    data.forEach((d,i)=>{ const dd=Math.abs(X(d.ano)-px); if(dd<bd){bd=dd;best=i;} });
+    setHi(best);
+  };
+  const hd = hi!=null ? data[hi] : null;
+  return (
+    <div style={{position:"relative"}}>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{display:"block"}}
+        onPointerMove={onMove} onPointerLeave={()=>setHi(null)}>
+        {gridY.map((g,i)=>(
+          <g key={i}>
+            <line x1={padL} y1={Y(g)} x2={W-padR} y2={Y(g)} stroke={C.borderSoft} strokeWidth="1"/>
+            <text x={padL-6} y={Y(g)+4} fill={C.faint} fontSize="11" textAnchor="end">{Math.round(g/1000)}k</text>
+          </g>
+        ))}
+        {data.map((d,i)=> i%stepX===0 ? (
+          <text key={i} x={X(d.ano)} y={H-padB+18} fill={C.faint} fontSize="11" textAnchor="middle">{d.ano}a</text>
+        ): null)}
+        {lines.map(l=>(
+          <polyline key={l.key} fill="none" stroke={l.color} strokeWidth={l.width||2}
+            strokeDasharray={l.dashed?"5 4":"none"}
+            points={data.map(d=>`${X(d.ano)},${Y(d[l.key])}`).join(" ")} />
+        ))}
+        {hd && (
+          <g>
+            <line x1={X(hd.ano)} y1={padT} x2={X(hd.ano)} y2={H-padB} stroke={C.border} strokeWidth="1"/>
+            {lines.map(l=> <circle key={l.key} cx={X(hd.ano)} cy={Y(hd[l.key])} r="3.5" fill={l.color} stroke={C.bg} strokeWidth="1.5"/>)}
+          </g>
+        )}
+      </svg>
+      <div style={{display:"flex",flexWrap:"wrap",gap:12,marginTop:6,fontSize:11,color:C.dim}}>
+        {lines.map(l=>(
+          <span key={l.key} style={{display:"inline-flex",alignItems:"center",gap:5}}>
+            <span style={{width:12,height:3,background:l.color,borderRadius:2,display:"inline-block"}}/>{l.name}
+          </span>
+        ))}
+      </div>
+      <div style={{marginTop:8,minHeight:34,fontSize:12,color:C.text,background:C.bgAlt,border:`1px solid ${C.borderSoft}`,borderRadius:8,padding:"7px 10px"}}>
+        {hd ? (
+          <span><b style={{color:C.dim}}>Ano {hd.ano}:</b>{" "}
+            {lines.map((l,i)=>(<span key={l.key} style={{color:l.color,fontFamily:"'IBM Plex Mono',monospace"}}>{i>0?"  ·  ":""}{l.name.split(" ")[0]} {eur(hd[l.key])}</span>))}
+          </span>
+        ) : <span style={{color:C.faint}}>Passa o dedo/rato sobre o gráfico para ver os valores de cada ano.</span>}
+      </div>
+    </div>
+  );
+}
+
+function BarChartMini({ data, bars, height=240, pctMode }) {
+  const W=560, H=height, padL=48, padR=14, padT=14, padB=30;
+  const vals=[]; data.forEach(d=> bars.forEach(b=> vals.push(d[b.key])));
+  let max=Math.max(0,...vals), min=Math.min(0,...vals);
+  if(max===min) max=min+1;
+  const Y = v => padT + (1-(v-min)/(max-min))*(H-padT-padB);
+  const groupW=(W-padL-padR)/data.length;
+  const innerW=groupW*0.7, bw=innerW/bars.length;
+  const fmtV = v => pctMode ? `${v}%` : `${Math.round(v/1000)}k`;
+  const baseY=Y(0);
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{display:"block"}}>
+      <line x1={padL} y1={baseY} x2={W-padR} y2={baseY} stroke={C.border} strokeWidth="1"/>
+      {[0,0.5,1].map((t,i)=>{const v=min+(max-min)*t; return (
+        <text key={i} x={padL-6} y={Y(v)+4} fill={C.faint} fontSize="11" textAnchor="end">{fmtV(v)}</text>
+      );})}
+      {data.map((d,gi)=>{
+        const gx=padL+groupW*gi+(groupW-innerW)/2;
+        return (
+          <g key={gi}>
+            {bars.map((b,bi)=>{
+              const v=d[b.key]; const x=gx+bw*bi; const y=v>=0?Y(v):baseY; const h=Math.abs(Y(v)-baseY);
+              return (
+                <g key={b.key}>
+                  <rect x={x} y={y} width={bw*0.85} height={Math.max(0,h)} fill={b.color} rx="3"/>
+                  <text x={x+bw*0.425} y={(v>=0?y-4:y+h+12)} fill={C.dim} fontSize="10" textAnchor="middle" fontFamily="'IBM Plex Mono',monospace">{fmtV(v)}</text>
+                </g>
+              );
+            })}
+            <text x={padL+groupW*gi+groupW/2} y={H-padB+18} fill={C.text} fontSize="11.5" textAnchor="middle">{d.nome}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+/* ── COMPONENTES DE UI ── */
+function Tip({ text, children }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span style={{position:"relative",display:"inline-flex",alignItems:"center"}}>
+      {children}
+      <button onMouseEnter={()=>setOpen(true)} onMouseLeave={()=>setOpen(false)} onClick={()=>setOpen(o=>!o)}
+        aria-label="Explicação" style={{marginLeft:4,color:C.faint,background:"none",border:"none",cursor:"help",padding:0,display:"inline-flex"}}>
+        <Icon name="info" size={13}/>
+      </button>
+      {open && (
+        <span style={{position:"absolute",bottom:"140%",left:"50%",transform:"translateX(-50%)",width:230,
+          background:C.surface2,color:C.text,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 10px",
+          zIndex:50,lineHeight:1.4,boxShadow:"0 8px 24px rgba(0,0,0,.5)",fontWeight:400,fontSize:12}}>{text}</span>
+      )}
+    </span>
+  );
+}
+function Section({ title, icon, children, defaultOpen=true }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div style={{marginBottom:12,background:C.surface,border:`1px solid ${C.borderSoft}`,borderRadius:12}}>
+      <button onClick={()=>setOpen(o=>!o)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",background:"none",border:"none",color:C.text,padding:"13px 16px",cursor:"pointer"}}>
+        <span style={{display:"flex",alignItems:"center",gap:8,fontWeight:600,fontSize:13,letterSpacing:".02em"}}>
+          {icon && <Icon name={icon} size={15} color={C.dim}/>} {title}
+        </span>
+        <span style={{transform:open?"rotate(180deg)":"none",transition:"transform .2s",display:"inline-flex",color:C.dim}}><Icon name="chevron-down" size={16}/></span>
+      </button>
+      {open && <div style={{padding:"4px 16px 16px"}}>{children}</div>}
+    </div>
+  );
+}
+function NumberField({ label, value, onChange, suffix="€", step=1000, tip }) {
+  return (
+    <div style={{marginBottom:12}}>
+      <label style={{display:"block",fontSize:12,marginBottom:4,color:C.dim}}>{tip?<Tip text={tip}><span>{label}</span></Tip>:label}</label>
+      <div style={{display:"flex",alignItems:"center",background:C.bgAlt,border:`1px solid ${C.border}`,borderRadius:8}}>
+        <input type="number" value={value} step={step} onChange={e=>onChange(parseFloat(e.target.value)||0)}
+          style={{width:"100%",background:"none",border:"none",color:C.text,padding:"9px 10px",outline:"none",fontFamily:"'IBM Plex Mono',monospace",fontSize:14}}/>
+        <span style={{fontSize:12,paddingRight:12,color:C.faint}}>{suffix}</span>
+      </div>
+    </div>
+  );
+}
+function SliderField({ label, value, onChange, min, max, step=1, suffix="", tip }) {
+  return (
+    <div style={{marginBottom:12}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
+        <label style={{fontSize:12,color:C.dim}}>{tip?<Tip text={tip}><span>{label}</span></Tip>:label}</label>
+        <span style={{fontSize:14,color:C.azulejo,fontFamily:"'IBM Plex Mono',monospace",fontWeight:600}}>{value.toLocaleString("pt-PT")}{suffix}</span>
+      </div>
+      <input type="range" min={min} max={max} step={step} value={value} onChange={e=>onChange(parseFloat(e.target.value))}/>
+    </div>
+  );
+}
+function SelectField({ label, value, onChange, options, tip }) {
+  return (
+    <div style={{marginBottom:12}}>
+      <label style={{display:"block",fontSize:12,marginBottom:4,color:C.dim}}>{tip?<Tip text={tip}><span>{label}</span></Tip>:label}</label>
+      <select value={value} onChange={e=>onChange(e.target.value)}
+        style={{width:"100%",fontSize:14,background:C.bgAlt,border:`1px solid ${C.border}`,borderRadius:8,color:C.text,padding:"9px 10px",outline:"none"}}>
+        {options.map(o=><option key={o.value} value={o.value} style={{background:C.surface}}>{o.label}</option>)}
+      </select>
+    </div>
+  );
+}
+function Toggle({ label, value, onChange, tip }) {
+  return (
+    <div style={{marginBottom:12,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+      <label style={{fontSize:12,color:C.dim}}>{tip?<Tip text={tip}><span>{label}</span></Tip>:label}</label>
+      <button onClick={()=>onChange(!value)} role="switch" aria-checked={value}
+        style={{width:42,height:23,borderRadius:999,border:"none",cursor:"pointer",background:value?C.azulejo:C.border,position:"relative",transition:"background .2s",flexShrink:0}}>
+        <span style={{position:"absolute",top:2,left:value?21:2,width:19,height:19,borderRadius:999,background:"#fff",transition:"left .2s"}}/>
+      </button>
+    </div>
+  );
+}
+function Stat({ label, value, sub, tip, color=C.text, big }) {
+  return (
+    <div style={{background:C.surface,border:`1px solid ${C.borderSoft}`,borderRadius:12,padding:"13px 15px"}}>
+      <div style={{fontSize:12,marginBottom:4,color:C.dim}}>{tip?<Tip text={tip}><span>{label}</span></Tip>:label}</div>
+      <div style={{color,fontFamily:"'IBM Plex Mono',monospace",fontWeight:600,fontSize:big?25:19,lineHeight:1.1,wordBreak:"break-word"}}>{value}</div>
+      {sub && <div style={{fontSize:12,marginTop:4,color:C.faint}}>{sub}</div>}
+    </div>
+  );
+}
+function SectionLabel({ children }) {
+  return (
+    <div style={{display:"flex",alignItems:"center",gap:12,marginTop:20,marginBottom:12}}>
+      <span style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:13,fontWeight:600,color:C.text}}>{children}</span>
+      <span style={{flex:1,height:1,background:C.borderSoft}}/>
+    </div>
+  );
+}
+
+/* ── GLOSSÁRIO ── */
+const GLOSSARIO = [
+  { grupo:"As três estratégias", cor:C.terra, termos:[
+    { t:"Reabilitar & Arrendar (BRRR)", d:"Sigla inglesa para Buy, Rehab, Rent, Refinance, Repeat: comprar um imóvel degradado, recuperá-lo, arrendá-lo e depois pedir um novo crédito sobre o valor já valorizado para recuperar parte do dinheiro investido — e repetir noutro imóvel. Gera renda mensal e vai libertando capital." },
+    { t:"Reabilitar & Revender (Flip)", d:"Comprar barato, fazer obras e vender rapidamente com lucro. Não há arrendamento: ganhas (ou perdes) na diferença entre o que gastaste e o que vendeste, depois de pagar impostos sobre o lucro." },
+    { t:"Terreno & Construir", d:"Comprar um terreno onde se pode construir, edificar uma casa nova de raiz e depois arrendá-la ou vendê-la. Tem custos extra (projeto, licenças) e um IMT diferente do de comprar casa pronta." },
+  ]},
+  { grupo:"Compra e impostos iniciais", cor:C.azulejo, termos:[
+    { t:"IMT", d:"Imposto Municipal sobre as Transmissões Onerosas de Imóveis. Paga-se uma única vez, ao comprar, antes da escritura. Quanto mais caro o imóvel, maior a taxa. Habitação secundária calcula-se por escalões; terreno de construção tem taxa fixa de 6,5%." },
+    { t:"Imposto do Selo", d:"Imposto fixo de 0,8% sobre o valor de compra, pago também no momento da aquisição. Simples: preço × 0,8%." },
+    { t:"Escritura + registo", d:"Custos do notário (formaliza a compra) e do registo predial (regista que o imóvel passou a ser teu)." },
+    { t:"IMT Jovem", d:"Benefício que isenta de IMT a primeira compra de casa própria e permanente por pessoas até 35 anos, até certo valor. Não se aplica a investimento — está aqui só para comparação." },
+    { t:"VPT (Valor Patrimonial Tributário)", d:"O valor 'oficial' que as Finanças atribuem ao imóvel. Costuma ser inferior ao de mercado e serve de base ao cálculo do IMI anual." },
+  ]},
+  { grupo:"Financiamento (o crédito)", cor:C.gold, termos:[
+    { t:"Capital próprio", d:"O dinheiro teu que tens mesmo de pôr do teu bolso: tudo o que o banco não financia — a entrada, as obras não cobertas pelo crédito e todos os impostos e custos da compra. É o número-chave para saber se consegues fazer o negócio." },
+    { t:"LTV (Loan-to-Value)", d:"A percentagem do valor que o banco empresta. LTV de 80% significa que o banco financia 80% e tu entras com 20% (a 'entrada'). Em investimento ronda os 80%; em casa própria pode chegar a 90%." },
+    { t:"TAN (Taxa Anual Nominal)", d:"A taxa de juro anual do empréstimo — o que pagas ao banco por te emprestar o dinheiro. Quanto mais alta, maior a prestação." },
+    { t:"Prazo", d:"O número de anos para pagar o empréstimo. Prazos mais longos baixam a prestação mensal, mas pagas mais juros no total." },
+    { t:"Carência de capital", d:"Período inicial (em meses) em que só pagas juros e ainda não abates a dívida. A prestação é mais baixa — útil durante as obras, antes de haver renda a entrar." },
+    { t:"Montante financiado", d:"O total que o banco empresta. Resulta de aplicar o LTV ao valor de compra (e às obras, se o banco também as financiar)." },
+    { t:"Prestação", d:"O valor que pagas ao banco por mês. A app mostra duas: a mais baixa durante a carência (só juros) e a normal depois (juros + amortização)." },
+  ]},
+  { grupo:"Património e valorização", cor:C.pos, termos:[
+    { t:"Equity", d:"A parte do imóvel que é mesmo tua: o valor do imóvel menos o que ainda deves ao banco. Casa de €200.000 com €150.000 de dívida = €50.000 de equity." },
+    { t:"Equity criada no dia 1", d:"A equity que existe logo após as obras: valor pós-obras menos a dívida. Mede o património que já 'ganhaste' assim que o projeto fica pronto." },
+    { t:"Valorização forçada", d:"O aumento de valor criado pela tua própria obra: valor pós-obras menos (preço de compra + obras). É a mais-valia que tu provocaste, ao contrário da subida natural do mercado." },
+    { t:"Valor pós-obras / avaliação", d:"Quanto o imóvel passa a valer depois de recuperado ou construído. Base para equity, refinanciamento e venda." },
+    { t:"Valorização anual", d:"A subida de preço estimada do imóvel por ano (%), devida ao mercado. Usada para projetar o valor futuro." },
+  ]},
+  { grupo:"Rendimento e rentabilidade (arrendar)", cor:C.azulejo, termos:[
+    { t:"Cashflow", d:"O dinheiro que efetivamente te sobra (ou falta) cada mês depois de receber a renda e pagar tudo: prestação, encargos e impostos. Positivo = o imóvel paga-se a si próprio e gera lucro; negativo = tens de meter dinheiro todos os meses." },
+    { t:"Yield bruto", d:"A renda de um ano a dividir pelo valor do imóvel (%). Rendimento 'em bruto', antes de despesas e impostos. Útil para comparar imóveis depressa." },
+    { t:"Yield líquido", d:"Como o bruto, mas depois de tirar despesas e IRS (e antes do financiamento). Mostra a rentabilidade real do imóvel enquanto ativo." },
+    { t:"ROE (Return on Equity)", d:"Rentabilidade sobre o teu dinheiro: cashflow anual a dividir pelo capital próprio. Responde a 'quanto rende, por ano, cada euro meu metido aqui?'." },
+    { t:"NOI", d:"Net Operating Income (rendimento operacional líquido): renda menos despesas de exploração e IRS, sem contar a prestação do crédito. Mostra quanto o imóvel rende independentemente de como foi financiado." },
+    { t:"Taxa de ocupação", d:"A percentagem do tempo em que o imóvel está arrendado a gerar renda. Importa sobretudo no Alojamento Local; em longa duração assume-se 100%." },
+    { t:"Break-even", d:"O ponto de equilíbrio: ao fim de quantos meses o cashflow acumulado iguala o capital próprio investido. A partir daí, recuperaste o investimento inicial." },
+  ]},
+  { grupo:"Impostos sobre rendas e venda", cor:C.neg, termos:[
+    { t:"IRS sobre rendas — Categoria F", d:"Regime normal de tributação das rendas: uma taxa sobre a renda anual menos despesas dedutíveis. A taxa vai de 28% até 10% ou 5%, conforme o tipo de arrendamento e a duração do contrato. Não se descontam juros nem desgaste do imóvel." },
+    { t:"IRS sobre rendas — Categoria B / AL", d:"Tributar as rendas como atividade (típico do Alojamento Local). Em contabilidade organizada permite descontar juros do crédito e a depreciação do imóvel, baixando o imposto. O lucro junta-se ao teu rendimento e é tributado à taxa marginal." },
+    { t:"Depreciação", d:"Um desgaste anual do edifício (não do terreno) que, em Cat B, podes descontar como custo — por norma 2% ao ano sobre o valor de construção. Reduz o lucro tributável e o imposto." },
+    { t:"Despesas dedutíveis", d:"Custos do imóvel que abates à renda antes de calcular o imposto: IMI, condomínio, seguros, manutenção." },
+    { t:"Mais-valias", d:"O lucro ao vender: valor de venda menos o custo total de aquisição (compra + obras + impostos). É sobre este ganho que incide imposto na venda." },
+    { t:"Categoria G (mais-valias pontuais)", d:"Numa venda pontual, só metade (50%) do ganho é tributada, à tua taxa marginal de IRS. É o caso comum de uma venda isolada." },
+    { t:"Categoria B (operações recorrentes)", d:"Se compras e vendes de forma frequente (como negócio), o fisco pode tributar 95% do ganho — bem mais do que os 50% de uma venda pontual." },
+    { t:"Taxa marginal de IRS", d:"A taxa do escalão de IRS mais alto em que cais. Aplica-se ao rendimento adicional, como mais-valias ou rendas em Cat B." },
+    { t:"Margem líquida", d:"O lucro final de um Flip ou de construir-para-vender, depois de tudo: venda menos custos de compra, obras, impostos, custos de venda e juros pagos durante a obra." },
+  ]},
+  { grupo:"Detenção e refinanciamento", cor:C.gold, termos:[
+    { t:"IMI", d:"Imposto Municipal sobre Imóveis. Paga-se todos os anos enquanto fores dono, sobre o VPT. A taxa varia por concelho (0,3% a 0,45%)." },
+    { t:"Refinanciamento (refi)", d:"Pedir um novo crédito com base no valor já valorizado do imóvel, para te devolver dinheiro. É o passo que dá o segundo 'R' ao BRRR e permite reinvestir noutro imóvel." },
+    { t:"Capital recuperado", d:"O dinheiro que sai do imóvel ao refinanciar: novo empréstimo menos a dívida que ainda tinhas. Capital teu que volta à conta." },
+    { t:"Capital efetivamente preso", d:"O que continua imobilizado no imóvel após o refi: capital próprio menos capital recuperado. Quanto menor, melhor — menos dinheiro 'parado'." },
+    { t:"Horizonte de análise", d:"O número de anos que a simulação projeta. Define até onde vai o gráfico de evolução do património." },
+    { t:"Património líquido (na projeção)", d:"O que ganhaste num dado ano: equity no imóvel mais cashflow acumulado, menos o capital próprio investido. Positivo = estás à frente face ao dinheiro que meteste." },
+  ]},
+];
+
+function GlossaryView() {
+  const [q, setQ] = useState("");
+  const query = q.trim().toLowerCase();
+  const grupos = GLOSSARIO.map(g=>({ ...g, termos: g.termos.filter(x=> !query || x.t.toLowerCase().includes(query) || x.d.toLowerCase().includes(query)) })).filter(g=>g.termos.length>0);
+  return (
+    <main className="wrap" style={{paddingTop:20,paddingBottom:20}}>
+      <div style={{marginBottom:16}}>
+        <h2 style={{fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:20,margin:"0 0 4px"}}>Glossário <span style={{color:C.azulejo}}>de termos</span></h2>
+        <p style={{fontSize:12,color:C.dim,margin:0}}>Todos os conceitos usados na app, em linguagem simples. Procura ou percorre por tema.</p>
+      </div>
+      <div style={{marginBottom:20}}>
+        <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Procurar termo… (ex.: yield, IMT, cashflow)"
+          style={{width:"100%",fontSize:14,background:C.bgAlt,border:`1px solid ${C.border}`,borderRadius:10,color:C.text,padding:"11px 14px",outline:"none"}}/>
+      </div>
+      {grupos.length===0 && <div style={{fontSize:14,color:C.dim}}>Nenhum termo encontrado para “{q}”.</div>}
+      <div className="gloss">
+        {grupos.map(g=>(
+          <div key={g.grupo} style={{background:C.surface,border:`1px solid ${C.borderSoft}`,borderRadius:14,padding:"16px 18px"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+              <span style={{width:9,height:9,borderRadius:999,background:g.cor,flexShrink:0}}/>
+              <h3 style={{fontFamily:"'Space Grotesk',sans-serif",fontWeight:600,fontSize:14,color:C.text,margin:0}}>{g.grupo}</h3>
+            </div>
+            <dl style={{margin:0}}>
+              {g.termos.map(x=>(
+                <div key={x.t} style={{marginBottom:12,paddingBottom:11,borderBottom:`1px solid ${C.borderSoft}`}}>
+                  <dt style={{color:g.cor,fontWeight:600,fontSize:13.5,marginBottom:3}}>{x.t}</dt>
+                  <dd style={{margin:0,color:C.dim,fontSize:13,lineHeight:1.55}}>{x.d}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        ))}
+      </div>
+      <div style={{display:"flex",alignItems:"flex-start",gap:8,fontSize:12,marginTop:20,color:C.dim,background:`${C.terra}12`,border:`1px solid ${C.terra}40`,borderRadius:10,padding:"11px 14px"}}>
+        <span style={{color:C.terra,flexShrink:0,marginTop:1}}><Icon name="alert" size={15}/></span>
+        <span>Definições simplificadas para aprendizagem. As regras fiscais reais têm exceções e condições — confirma sempre com um contabilista certificado antes de decidir.</span>
+      </div>
+    </main>
+  );
+}
+
+/* ── BLOCO DE RESULTADOS ── */
+function ResultsHeader({ r, S, isArrendar, isVender, inp, strategy }) {
+  const cfPos = r.cashflowMensal >= 0;
+  return (
+    <div>
+      <div style={{background:`linear-gradient(135deg, ${C.surface}, ${C.bgAlt})`,border:`1px solid ${C.border}`,borderRadius:14,padding:"18px 20px",marginBottom:14}}>
+        <div style={{display:"flex",flexWrap:"wrap",alignItems:"flex-end",justifyContent:"space-between",gap:12}}>
+          <div>
+            <div style={{fontSize:12,marginBottom:4,color:C.dim}}><Tip text="Entrada + obras não financiadas + impostos de compra (IMT, Selo) + escritura/registo − empréstimo."><span>Capital próprio necessário</span></Tip></div>
+            <div style={{fontFamily:"'IBM Plex Mono',monospace",fontWeight:600,fontSize:34,color:S.cor,lineHeight:1}}>{eur(r.capitalProprio)}</div>
+            <div style={{fontSize:12,marginTop:8,color:C.faint}}>Investimento total {eur(r.investimentoTotal)} · empréstimo {eur(r.emprestimo)}</div>
+          </div>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontSize:12,marginBottom:4,color:C.dim}}>{isVender?"ROI (margem / capital)":"ROE (cashflow / capital)"}</div>
+            <div style={{fontFamily:"'IBM Plex Mono',monospace",fontWeight:600,fontSize:26,color:r.roeComparacao>=0?C.pos:C.neg}}>{pct(r.roeComparacao)}</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="cards cards-4" style={{marginBottom:12}}>
+        <Stat label="IMT" value={eur(r.imt)} tip={r.terreno?"Terreno de construção: taxa fixa de 6,5%.":"Tabela de habitação secundária 2026 (escalões progressivos com parcela a abater)."}/>
+        <Stat label="Imposto do Selo" value={eur(r.selo)} tip="0,8% sobre o valor de aquisição."/>
+        <Stat label="Escritura + registo" value={eur(r.escritura)}/>
+        <Stat label="Custo de obras/construção" value={eur(r.custoObras)} sub={r.terreno?"inclui extras de projeto":undefined}/>
+      </div>
+
+      <div className="cards cards-3" style={{marginBottom:12}}>
+        <Stat label="Montante financiado" value={eur(r.emprestimo)} color={C.azulejo}/>
+        <Stat label="Prestação (após carência)" value={eur2(r.prestacaoNormal)} sub="por mês" tip="Anuidade constante sobre o prazo de amortização (prazo − carência)."/>
+        <Stat label="Prestação na carência" value={eur2(r.prestacaoCarencia)} sub={`${inp.carenciaMeses} meses · só juros`}/>
+      </div>
+
+      <div className="cards cards-3" style={{marginBottom:12}}>
+        <Stat label="Equity criada no dia 1" value={eur(r.equityDia1)} color={C.gold} big tip="Valor pós-obras − dívida. Património líquido imediato no imóvel."/>
+        <Stat label="Valorização forçada (obra)" value={eur(r.valorizacaoForcada)} tip="Valor pós-obras − (preço + obras). Mais-valia criada pela própria reabilitação/construção."/>
+        <Stat label="Equity de capital próprio" value={eur(r.equityDeCapitalProprio)} tip="Parte da equity que veio do teu dinheiro (e não da valorização forçada)."/>
+      </div>
+
+      {isArrendar && (
+        <div>
+          <SectionLabel>Cashflow & rentabilidade do arrendamento</SectionLabel>
+          <div className="cards cards-4" style={{marginBottom:12}}>
+            <Stat label="Cashflow mensal" value={eur2(r.cashflowMensal)} color={cfPos?C.pos:C.neg} big tip="Renda × ocupação − prestação − encargos − IRS, por mês (após carência)."/>
+            <Stat label="Cashflow anual" value={eur2(r.cashflowAnual)} color={cfPos?C.pos:C.neg}/>
+            <Stat label="Yield bruto" value={pct(r.yieldBruto)} tip="Renda anual / valor do imóvel."/>
+            <Stat label="Yield líquido" value={pct(r.yieldLiquido)} tip="(Renda − encargos − IRS) / valor do imóvel, antes de financiamento."/>
+          </div>
+          <div className="cards cards-3" style={{marginBottom:12}}>
+            <Stat label="IRS anual sobre rendas" value={eur2(r.irs.imposto)} color={C.neg} tip={`Base tributável ${eur(r.irs.base)} · deduções ${eur(r.irs.deducoes)}.`}/>
+            <Stat label="IMI anual" value={eur2(r.imiAnual)} tip={`${inp.imiTaxa}% sobre VPT de ${eur(inp.vpt)}.`}/>
+            <Stat label="Break-even do capital" value={meses(r.breakEvenMeses)} color={C.azulejo} tip="Meses até o cashflow acumulado cobrir o capital próprio."/>
+          </div>
+          {r.irs.depreciacao>0 && (
+            <div style={{fontSize:12,marginBottom:12,color:C.dim,background:C.surface,border:`1px solid ${C.borderSoft}`,borderRadius:10,padding:"11px 14px"}}>
+              <b style={{color:C.azulejo}}>Efeito da depreciação (Cat B):</b> deduz {eur(r.irs.depreciacao)}/ano + juros {eur(r.irs.juros)} → base tributável reduzida para {eur(r.irs.base)}. Sem estas deduções (Cat F), o imposto seria substancialmente superior.
+            </div>
+          )}
+        </div>
+      )}
+
+      {strategy==="brrr" && (
+        <div>
+          <SectionLabel>Cenário de refinanciamento</SectionLabel>
+          <div className="cards cards-4" style={{marginBottom:12}}>
+            <Stat label="Novo empréstimo" value={eur(r.novoEmprestimo)} color={C.azulejo} tip={`${inp.ltvRefi}% sobre o valor pós-obras de ${eur(r.valorPosObras)}.`}/>
+            <Stat label="Capital recuperado" value={eur(r.capitalRecuperado)} color={C.pos} tip="Novo empréstimo − dívida atual. Dinheiro que sai do imóvel ao refinanciar."/>
+            <Stat label="Capital efetivamente preso" value={eur(r.capitalPreso)} color={C.gold} tip="Capital próprio − capital recuperado. O que fica imobilizado após o refi."/>
+            <Stat label="Nova prestação" value={eur2(r.prestacaoRefi)} sub="por mês"/>
+          </div>
+        </div>
+      )}
+
+      {isVender && (
+        <div>
+          <SectionLabel>Margem da venda após impostos</SectionLabel>
+          <div className="cards cards-4" style={{marginBottom:12}}>
+            <Stat label="Margem líquida" value={eur(r.margemLiquida)} color={r.margemLiquida>=0?C.pos:C.neg} big tip="Venda − custo total de aquisição − custos de venda − juros de obra − imposto sobre mais-valias."/>
+            <Stat label="Mais-valia (ganho)" value={eur(r.mv.ganho)} tip="Valor de venda − custo total de aquisição."/>
+            <Stat label="Imposto mais-valias" value={eur2(r.mv.imposto)} color={C.neg} sub={`${r.mv.fracaoTributavel*100}% tributado @ ${inp.taxaMarginal}%`}/>
+            <Stat label="ROI sobre capital" value={pct(r.roiFlip)} color={r.roiFlip>=0?C.pos:C.neg}/>
+          </div>
+          <div className="cards cards-3" style={{marginBottom:12}}>
+            <Stat label="Custos de venda" value={eur2(r.custosVenda)}/>
+            <Stat label="Juros durante a obra" value={eur2(r.jurosObra)} sub={`${inp.mesesObra} meses`}/>
+            <Stat label="Custo total aquisição" value={eur(r.precoCompra+r.custoObras+r.impostosCompra)}/>
+          </div>
+        </div>
+      )}
+
+      <SectionLabel>Projeção a {inp.horizonte} anos</SectionLabel>
+      <div style={{background:C.surface,border:`1px solid ${C.borderSoft}`,borderRadius:12,padding:"16px 14px 12px",marginBottom:12}}>
+        <LineChartMini data={r.projecao} lines={[
+          { key:"patrimonio", name:"Património líquido", color:S.cor, width:2.5 },
+          { key:"equity", name:"Equity no imóvel", color:C.azulejo, dashed:true },
+          { key:"cashflowAcum", name:"Cashflow acumulado", color:C.pos, dashed:true },
+        ]}/>
+      </div>
+    </div>
+  );
+}
+
+/* ── VISTA COMPARAR ── */
+function CompareView({ all }) {
+  const order=["brrr","flip","build"];
+  const rows=[
+    { key:"capitalProprio", label:"Capital próprio necessário", fmt:eur },
+    { key:"emprestimo", label:"Montante financiado", fmt:eur },
+    { key:"equityDia1", label:"Equity no dia 1", fmt:eur },
+    { key:"roeComparacao", label:"ROE / ROI", fmt:pct },
+    { key:"patrimonioFinal", label:"Património ao fim do horizonte", fmt:eur },
+  ];
+  const barData=order.map(k=>({ nome:STRATS[k].curto, capital:Math.round(all[k].capitalProprio), patrimonio:Math.round(all[k].patrimonioFinal) }));
+  const roeData=order.map(k=>({ nome:STRATS[k].curto, roe:+(all[k].roeComparacao*100).toFixed(1) }));
+  return (
+    <main className="wrap" style={{paddingTop:20,paddingBottom:20}}>
+      <div style={{fontSize:12,marginBottom:16,color:C.dim}}>As três estratégias com os mesmos pressupostos de mercado, financiamento e fiscalidade definidos nos inputs.</div>
+      <div className="cmp-cards" style={{marginBottom:20}}>
+        {order.map(k=>{const s=STRATS[k];const d=all[k];return (
+          <div key={k} style={{background:C.surface,border:`1px solid ${s.cor}55`,borderRadius:14,padding:"16px 18px"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12,color:s.cor,fontWeight:600,fontSize:14}}><Icon name={s.icon} size={16}/> {s.nome}</div>
+            <div style={{fontSize:12,marginBottom:4,color:C.dim}}>Capital próprio</div>
+            <div style={{fontFamily:"'IBM Plex Mono',monospace",fontWeight:600,fontSize:23,marginBottom:8}}>{eur(d.capitalProprio)}</div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:C.dim}}><span>ROE/ROI</span><span style={{color:d.roeComparacao>=0?C.pos:C.neg,fontFamily:"'IBM Plex Mono',monospace"}}>{pct(d.roeComparacao)}</span></div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginTop:4,color:C.dim}}><span>Património ({d.projecao.length-1}a)</span><span style={{color:d.patrimonioFinal>=0?C.pos:C.neg,fontFamily:"'IBM Plex Mono',monospace"}}>{eur(d.patrimonioFinal)}</span></div>
+          </div>
+        );})}
+      </div>
+      <div className="cmp-charts" style={{marginBottom:20}}>
+        <div style={{background:C.surface,border:`1px solid ${C.borderSoft}`,borderRadius:12,padding:"16px 14px"}}>
+          <div style={{fontSize:12,marginBottom:8,color:C.dim}}>Capital próprio vs. património final (€)</div>
+          <BarChartMini data={barData} bars={[{key:"capital",name:"Capital próprio",color:C.azulejo},{key:"patrimonio",name:"Património final",color:C.terra}]}/>
+          <div style={{display:"flex",gap:14,marginTop:4,fontSize:11,color:C.dim}}>
+            <span style={{display:"inline-flex",alignItems:"center",gap:5}}><span style={{width:10,height:10,background:C.azulejo,borderRadius:2}}/>Capital próprio</span>
+            <span style={{display:"inline-flex",alignItems:"center",gap:5}}><span style={{width:10,height:10,background:C.terra,borderRadius:2}}/>Património final</span>
+          </div>
+        </div>
+        <div style={{background:C.surface,border:`1px solid ${C.borderSoft}`,borderRadius:12,padding:"16px 14px"}}>
+          <div style={{fontSize:12,marginBottom:8,color:C.dim}}>Rentabilidade do capital — ROE / ROI (%)</div>
+          <BarChartMini data={roeData} bars={[{key:"roe",name:"ROE/ROI",color:C.gold}]} pctMode/>
+        </div>
+      </div>
+      <div className="tbl-scroll" style={{background:C.surface,border:`1px solid ${C.borderSoft}`,borderRadius:12}}>
+        <table style={{width:"100%",borderCollapse:"collapse",minWidth:480}}>
+          <thead>
+            <tr style={{borderBottom:`1px solid ${C.border}`}}>
+              <th style={{textAlign:"left",padding:"12px 16px",color:C.dim,fontWeight:500,fontSize:12}}>Métrica</th>
+              {order.map(k=><th key={k} style={{textAlign:"right",padding:"12px 16px",color:STRATS[k].cor,fontWeight:600,fontSize:12}}>{STRATS[k].curto}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(row=>(
+              <tr key={row.key} style={{borderBottom:`1px solid ${C.borderSoft}`}}>
+                <td style={{padding:"11px 16px",color:C.dim,fontSize:13}}>{row.label}</td>
+                {order.map(k=><td key={k} style={{textAlign:"right",padding:"11px 16px",fontFamily:"'IBM Plex Mono',monospace",color:C.text,fontSize:13}}>{row.fmt(all[k][row.key])}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </main>
+  );
+}
+
+/* ── APP ── */
+function App() {
+  const [strategy, setStrategy] = useState("brrr");
+  const [view, setView] = useState("simular");
+  const [inp, setInp] = useState({
+    preco:130000, obras:45000, custoModo:"m2", areaM2:160, custoM2:1400, extraConstrucaoPct:25, avaliacao:235000,
+    ltv:80, tan:4.0, prazoAnos:30, carenciaMeses:24, financiaObras:true,
+    saida:"arrendar", renda:1050, ocupacao:100, regimeIRS:"catF10", despesasAnuais:1400,
+    valorizacao:3, horizonte:10, frequencia:"pontual", taxaMarginal:35,
+    vpt:110000, imiTaxa:0.35, ltvRefi:80, aplicarRefi:true, mesesObra:12, custosVendaPct:3, valorVenda:235000,
+    escritura:ESCRITURA_REGISTO_DEFAULT, imtJovem:false,
+  });
+  const set=(k,v)=>setInp(p=>({ ...p, [k]:v }));
+  const r=useMemo(()=>computeScenario(inp,strategy),[inp,strategy]);
+  const all=useMemo(()=>({ brrr:computeScenario(inp,"brrr"), flip:computeScenario(inp,"flip"), build:computeScenario(inp,"build") }),[inp]);
+  const S=STRATS[strategy];
+  const isArrendar = strategy==="brrr" || (strategy==="build" && inp.saida==="arrendar");
+  const isVender = r.vende;
+  const tabStyle=(active,cor)=>({padding:"9px 14px",borderRadius:10,cursor:"pointer",border:`1px solid ${active?cor:C.border}`,background:active?`${cor}1f`:C.surface,color:active?cor:C.dim,fontWeight:600,fontSize:14,display:"inline-flex",alignItems:"center",gap:8});
+
+  return (
+    <div style={{background:C.bg,minHeight:"100vh",color:C.text}}>
+      <header style={{borderBottom:`1px solid ${C.borderSoft}`,background:C.bgAlt}}>
+        <div className="wrap" style={{paddingTop:16,paddingBottom:16}}>
+          <div style={{display:"flex",alignItems:"center",gap:12}}>
+            <div style={{width:34,height:34,borderRadius:9,background:`linear-gradient(135deg, ${C.terra}, ${C.azulejoDark})`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><Icon name="building" size={19} color="#fff"/></div>
+            <div>
+              <h1 style={{fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:19,letterSpacing:"-.01em",margin:0}}>Simulador Imobiliário <span style={{color:C.terra}}>PT</span></h1>
+              <p style={{fontSize:12,color:C.dim,margin:0}}>Fiscalidade 2026 · análise de capital, cashflow e património</p>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div className="wrap" style={{paddingTop:16}}>
+        <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",gap:8}}>
+          {Object.entries(STRATS).map(([k,s])=>{const active=strategy===k&&view==="simular";return (
+            <button key={k} onClick={()=>{setStrategy(k);setView("simular");}} style={tabStyle(active,s.cor)}><Icon name={s.icon} size={15}/> {s.nome}</button>
+          );})}
+          <div style={{flex:1,minWidth:8}}/>
+          <button onClick={()=>setView("comparar")} style={tabStyle(view==="comparar",C.gold)}><Icon name="scale" size={15}/> Comparar as 3</button>
+          <button onClick={()=>setView("glossario")} style={tabStyle(view==="glossario",C.azulejo)}><Icon name="book" size={15}/> Glossário</button>
+        </div>
+      </div>
+
+      {view==="comparar" ? <CompareView all={all}/> :
+       view==="glossario" ? <GlossaryView/> : (
+        <main className="wrap layout-grid" style={{paddingTop:20,paddingBottom:20}}>
+          <div>
+            <Section title="Aquisição" icon="layers">
+              {strategy==="build" ? (
+                <div>
+                  <NumberField label="Preço do terreno" value={inp.preco} onChange={v=>set("preco",v)} tip="Compra do terreno urbano. IMT a 6,5% (taxa fixa para terreno de construção)."/>
+                  <SelectField label="Custo de construção" value={inp.custoModo} onChange={v=>set("custoModo",v)} options={[{value:"m2",label:"Calcular por m²"},{value:"total",label:"Introduzir custo total"}]}/>
+                  {inp.custoModo==="m2" ? (
+                    <div className="grid g2">
+                      <NumberField label="Área (m²)" value={inp.areaM2} onChange={v=>set("areaM2",v)} suffix="m²" step={5}/>
+                      <NumberField label="Custo / m²" value={inp.custoM2} onChange={v=>set("custoM2",v)} step={50} tip="Custo de construção por m². Default €1.400/m²."/>
+                    </div>
+                  ) : <NumberField label="Custo de construção total" value={inp.obras} onChange={v=>set("obras",v)}/>}
+                  <SliderField label="Extra (projeto, licenças, ligações)" value={inp.extraConstrucaoPct} onChange={v=>set("extraConstrucaoPct",v)} min={0} max={50} suffix=" %" tip="Adicional sobre a construção para projeto, licenças e ligações. Default 25%."/>
+                </div>
+              ) : (
+                <div>
+                  <NumberField label="Preço de compra do imóvel" value={inp.preco} onChange={v=>set("preco",v)} tip="Aquisição do imóvel a reabilitar. IMT pela tabela de habitação secundária (1.º escalão a 1%)."/>
+                  <NumberField label="Custo das obras" value={inp.obras} onChange={v=>set("obras",v)}/>
+                </div>
+              )}
+              <NumberField label="Valor pós-obras / avaliação" value={inp.avaliacao} onChange={v=>set("avaliacao",v)} tip="Valor final após reabilitação/construção. Base para equity, refinanciamento e venda."/>
+            </Section>
+
+            <Section title="Financiamento" icon="bank">
+              <SliderField label="LTV (financiamento)" value={inp.ltv} onChange={v=>set("ltv",v)} min={0} max={90} suffix=" %" tip="Loan-to-Value. Default 80% para investimento, 90% para habitação própria."/>
+              <SliderField label="TAN (taxa de juro anual)" value={inp.tan} onChange={v=>set("tan",v)} min={0} max={8} step={0.1} suffix=" %"/>
+              <SliderField label="Prazo do crédito" value={inp.prazoAnos} onChange={v=>set("prazoAnos",v)} min={5} max={40} suffix=" anos"/>
+              <SliderField label="Carência de capital" value={inp.carenciaMeses} onChange={v=>set("carenciaMeses",v)} min={0} max={36} suffix=" meses" tip="Período inicial em que só se pagam juros (capital não amortiza)."/>
+              <Toggle label="Banco financia também obras/construção" value={inp.financiaObras} onChange={v=>set("financiaObras",v)}/>
+            </Section>
+
+            <Section title="Exploração" icon="key">
+              {strategy==="build" && <SelectField label="Estratégia de saída" value={inp.saida} onChange={v=>set("saida",v)} options={[{value:"arrendar",label:"Arrendar"},{value:"vender",label:"Vender"}]}/>}
+              {strategy==="flip" && <div style={{fontSize:12,marginBottom:12,color:C.faint}}>Estratégia de saída: <b style={{color:C.terra}}>vender</b> (margem após impostos).</div>}
+              {isArrendar && (
+                <div>
+                  <SliderField label="Renda mensal" value={inp.renda} onChange={v=>set("renda",v)} min={200} max={4000} step={25} suffix=" €"/>
+                  <SliderField label="Taxa de ocupação" value={inp.ocupacao} onChange={v=>set("ocupacao",v)} min={50} max={100} suffix=" %" tip="Relevante para Alojamento Local. 100% para longa duração."/>
+                  <SelectField label="Regime de IRS sobre rendas" value={inp.regimeIRS} onChange={v=>set("regimeIRS",v)} options={Object.entries(REGIMES_IRS).map(([v,c])=>({value:v,label:c.label}))} tip="Cat F: taxa autónoma, só deduz despesas. Cat B/AL: deduz juros + depreciação, tributado à taxa marginal."/>
+                  <NumberField label="Despesas anuais dedutíveis" value={inp.despesasAnuais} onChange={v=>set("despesasAnuais",v)} step={100} tip="Condomínio, seguros, manutenção. O IMI é somado automaticamente a partir do VPT."/>
+                </div>
+              )}
+              {isVender && (
+                <div>
+                  {strategy==="build" && <NumberField label="Valor de venda" value={inp.valorVenda} onChange={v=>set("valorVenda",v)} tip="No Flip usa-se o valor pós-obras. Para construir-para-vender, define aqui o preço alvo."/>}
+                  <SliderField label="Custos de venda" value={inp.custosVendaPct} onChange={v=>set("custosVendaPct",v)} min={0} max={8} step={0.5} suffix=" %" tip="Mediação imobiliária e outros custos de transação na venda."/>
+                  <SliderField label="Meses de obra (custo de juro)" value={inp.mesesObra} onChange={v=>set("mesesObra",v)} min={0} max={36} suffix=" meses"/>
+                </div>
+              )}
+            </Section>
+
+            <Section title="Mercado / Saída" icon="trending" defaultOpen={false}>
+              <SliderField label="Valorização anual estimada" value={inp.valorizacao} onChange={v=>set("valorizacao",v)} min={0} max={10} step={0.5} suffix=" %"/>
+              <SliderField label="Horizonte de análise" value={inp.horizonte} onChange={v=>set("horizonte",v)} min={1} max={30} suffix=" anos"/>
+              <SelectField label="Frequência da operação" value={inp.frequencia} onChange={v=>set("frequencia",v)} options={[{value:"pontual",label:"Pontual — mais-valias Cat G (50% tributado)"},{value:"recorrente",label:"Recorrente — Cat B (95% tributado)"}]} tip="Operações recorrentes podem ser enquadradas em Cat B, com 95% do ganho tributado."/>
+              <SliderField label="Taxa marginal de IRS" value={inp.taxaMarginal} onChange={v=>set("taxaMarginal",v)} min={14} max={53} suffix=" %" tip="Usada para mais-valias e englobamento em Cat B."/>
+            </Section>
+
+            <Section title="Fiscalidade & Detenção" icon="scale" defaultOpen={false}>
+              <NumberField label="VPT (Valor Patrimonial Tributário)" value={inp.vpt} onChange={v=>set("vpt",v)} tip="Base do IMI. Habitualmente inferior ao valor de mercado."/>
+              <SliderField label="Taxa de IMI (concelho)" value={inp.imiTaxa} onChange={v=>set("imiTaxa",v)} min={0.3} max={0.45} step={0.01} suffix=" %" tip="Varia por concelho, entre 0,3% e 0,45% do VPT."/>
+              <NumberField label="Escritura + registo" value={inp.escritura} onChange={v=>set("escritura",v)} step={100}/>
+              {strategy==="brrr" && (
+                <div>
+                  <SliderField label="LTV no refinanciamento" value={inp.ltvRefi} onChange={v=>set("ltvRefi",v)} min={0} max={90} suffix=" %"/>
+                  <Toggle label="Aplicar refi na projeção" value={inp.aplicarRefi} onChange={v=>set("aplicarRefi",v)}/>
+                </div>
+              )}
+              <Toggle label="IMT Jovem (≤35, 1.ª HPP) — informativo" value={inp.imtJovem} onChange={v=>set("imtJovem",v)} tip="Isenção até €330.539 para 1.ª habitação própria permanente de jovens ≤35. Não aplicável a investimento puro."/>
+            </Section>
+          </div>
+
+          <ResultsHeader r={r} S={S} isArrendar={isArrendar} isVender={isVender} inp={inp} strategy={strategy}/>
+        </main>
+      )}
+
+      {view!=="glossario" && (
+        <footer className="wrap" style={{paddingBottom:32}}>
+          <div style={{display:"flex",alignItems:"flex-start",gap:8,fontSize:12,color:C.dim,background:`${C.terra}12`,border:`1px solid ${C.terra}40`,borderRadius:10,padding:"11px 14px"}}>
+            <span style={{color:C.terra,flexShrink:0,marginTop:1}}><Icon name="alert" size={15}/></span>
+            <span>Estimativas para fins de análise. A fiscalidade (sobretudo Cat B, depreciações e IVA da reabilitação/construção) tem nuances que exigem confirmação por contabilista certificado. Tabelas de IMT conforme Ofício Circulado n.º 40129/2026 da AT.</span>
+          </div>
+        </footer>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+  </script>
+</body>
+</html>
